@@ -1,0 +1,22 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+celery>=5.3.6
+redis>=5.0.1
+oss2>=2.18.4
+openai>=1.12.0
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.6
+requests>=2.31.0
+python-docx>=1.1.0
+openpyxl>=3.1.2
+PyPDF2>=3.0.1
+pdfplumber>=0.10.4
+
+# --- 可选依赖 ---
+# anthropic>=0.40.0   # Claude 原生 API（通过兼容层调用时无需安装）
+# docling>=2.0.0      # 高级文档解析（Phase 2 引入）
+# minio>=7.2.0        # MinIO 私有化存储（Phase 7 引入）
+# smbprotocol>=1.13.0 # SMB 共享文件夹连接器（Phase 8 引入，可选）

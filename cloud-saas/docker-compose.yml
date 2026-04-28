@@ -1,0 +1,116 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: aerosync-postgres
+    environment:
+      POSTGRES_USER: aerosync
+      POSTGRES_PASSWORD: aerosync_pass
+      POSTGRES_DB: aerosync
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aerosync -d aerosync"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aerosync-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: aerosync-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aerosync-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: aerosync-api
+    environment:
+      - DATABASE_URL=postgresql://aerosync:aerosync_pass@postgres:5432/aerosync
+      - REDIS_URL=redis://redis:6379/0
+      - API_TOKEN=${API_TOKEN:-dev-token-2024}
+      - OSS_ACCESS_KEY_ID=${OSS_ACCESS_KEY_ID:-}
+      - OSS_ACCESS_KEY_SECRET=${OSS_ACCESS_KEY_SECRET:-}
+      - OSS_ENDPOINT=${OSS_ENDPOINT:-oss-cn-shanghai.aliyuncs.com}
+      - OSS_BUCKET=${OSS_BUCKET:-aerosync-dev}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o}
+      - DEFAULT_WEBHOOK_URL=${DEFAULT_WEBHOOK_URL:-}
+      - DEFAULT_WEBHOOK_SECRET=${DEFAULT_WEBHOOK_SECRET:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api:/app/api
+      - ./worker:/app/worker
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+    networks:
+      - aerosync-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: aerosync-worker
+    environment:
+      - DATABASE_URL=postgresql://aerosync:aerosync_pass@postgres:5432/aerosync
+      - REDIS_URL=redis://redis:6379/0
+      - API_TOKEN=${API_TOKEN:-dev-token-2024}
+      - OSS_ACCESS_KEY_ID=${OSS_ACCESS_KEY_ID:-}
+      - OSS_ACCESS_KEY_SECRET=${OSS_ACCESS_KEY_SECRET:-}
+      - OSS_ENDPOINT=${OSS_ENDPOINT:-oss-cn-shanghai.aliyuncs.com}
+      - OSS_BUCKET=${OSS_BUCKET:-aerosync-dev}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o}
+      - DEFAULT_WEBHOOK_URL=${DEFAULT_WEBHOOK_URL:-}
+      - DEFAULT_WEBHOOK_SECRET=${DEFAULT_WEBHOOK_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api:/app/api
+      - ./worker:/app/worker
+    command: celery -A worker.celery_worker worker --loglevel=info --concurrency=2
+    networks:
+      - aerosync-net
+
+  flower:
+    image: mher/flower:2.0
+    container_name: aerosync-flower
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_PORT=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    networks:
+      - aerosync-net
+
+volumes:
+  pg_data:
+
+networks:
+  aerosync-net:
+    driver: bridge

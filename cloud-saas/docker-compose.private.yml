@@ -1,0 +1,178 @@
+# ==========================================
+# AeroSync 私有化一键部署
+# 组成：PostgreSQL + Redis + MinIO + Ollama + API + Worker
+# 用法：docker compose -f docker-compose.private.yml up -d
+# ==========================================
+
+version: "3.9"
+
+services:
+  # --- 数据库 ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: aerosync-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aerosync
+      POSTGRES_PASSWORD: aerosync_private
+      POSTGRES_DB: aerosync
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aerosync"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aerosync-private
+
+  # --- 缓存 / Celery Broker ---
+  redis:
+    image: redis:7-alpine
+    container_name: aerosync-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - aerosync-private
+
+  # --- 对象存储 (MinIO 替代 OSS) ---
+  minio:
+    image: minio/minio:latest
+    container_name: aerosync-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aerosync-private
+
+  # --- 本地 LLM (Ollama) ---
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aerosync-ollama
+    restart: unless-stopped
+    # 如有 NVIDIA GPU，取消下面注释以启用 CUDA 加速
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    # 启动后自动拉取中文友好模型（第一次启动较慢，约 4-8GB）
+    entrypoint: >
+      sh -c "
+        ollama serve &
+        sleep 15
+        echo '>>> 正在拉取默认模型 qwen2.5:7b ...'
+        ollama pull qwen2.5:7b || true
+        echo '>>> 模型拉取完成（或已存在），保持服务运行'
+        wait
+      "
+    networks:
+      - aerosync-private
+
+  # --- FastAPI 服务 ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: aerosync-api
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://aerosync:aerosync_private@postgres:5432/aerosync
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_TYPE=minio
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=aerosync
+      - MINIO_SECURE=false
+      - LLM_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
+      - OLLAMA_MODEL=qwen2.5:7b
+      - API_TOKEN=change-me-in-production
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - aerosync-private
+    volumes:
+      - ./api/static:/app/api/static:ro
+
+  # --- Celery Worker ---
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: aerosync-worker
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://aerosync:aerosync_private@postgres:5432/aerosync
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_TYPE=minio
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=aerosync
+      - MINIO_SECURE=false
+      - LLM_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
+      - OLLAMA_MODEL=qwen2.5:7b
+      - API_TOKEN=change-me-in-production
+      - LOG_LEVEL=INFO
+      # 如需启用混合解析（需要在镜像中安装 docling）
+      # - ENABLE_HYBRID_PARSER=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - aerosync-private
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  ollama_data:
+
+networks:
+  aerosync-private:
+    driver: bridge

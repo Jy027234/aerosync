@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AeroSync 管理后台</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { darkMode: 'class', theme: { extend: { colors: { slate: { 850: '#1e293b' } } } } };
+</script>
+<style>
+[x-cloak] { display: none !important; }
+.bar { height: 8px; border-radius: 4px; background: #3b82f6; transition: width .6s ease; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+</style>
+</head>
+<body class="bg-slate-900 text-slate-200 h-screen overflow-hidden" x-data="app()" x-init="initApp()">
+
+<!-- Token 登录弹窗 -->
+<div x-show="!token" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70" x-cloak>
+  <div class="bg-slate-800 rounded-xl p-8 w-full max-w-md shadow-2xl border border-slate-700">
+    <h2 class="text-2xl font-bold mb-4 text-white">🚁 AeroSync 管理后台</h2>
+    <p class="text-slate-400 mb-6">请输入 API Token 以继续</p>
+    <input x-model="inputToken" type="password" placeholder="Bearer Token" class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:outline-none focus:border-blue-500 mb-4">
+    <button @click="saveToken()" class="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold">进入系统</button>
+  </div>
+</div>
+
+<div class="flex h-full" x-show="token" x-cloak>
+  <!-- 左侧导航 -->
+  <aside class="w-56 bg-slate-850 border-r border-slate-700 flex flex-col">
+    <div class="p-5 border-b border-slate-700">
+      <h1 class="text-xl font-bold text-white tracking-wide">AeroSync</h1>
+      <p class="text-xs text-slate-400 mt-1">航空文档智能解析</p>
+    </div>
+    <nav class="flex-1 p-3 space-y-1">
+      <button @click="page='dashboard'" :class="page==='dashboard'?'bg-blue-600 text-white':'hover:bg-slate-700'" class="w-full text-left px-4 py-2 rounded-lg text-sm font-medium transition">📊 仪表盘</button>
+      <button @click="page='tasks';loadTasks()" :class="page==='tasks'?'bg-blue-600 text-white':'hover:bg-slate-700'" class="w-full text-left px-4 py-2 rounded-lg text-sm font-medium transition">📋 任务管理</button>
+      <button @click="page='hitl';loadHitlTasks()" :class="page==='hitl'?'bg-blue-600 text-white':'hover:bg-slate-700'" class="w-full text-left px-4 py-2 rounded-lg text-sm font-medium transition">👤 HITL 审核</button>
+      <button @click="page='tenant';loadTenant()" :class="page==='tenant'?'bg-blue-600 text-white':'hover:bg-slate-700'" class="w-full text-left px-4 py-2 rounded-lg text-sm font-medium transition">⚙️ 租户配置</button>
+    </nav>
+    <div class="p-4 border-t border-slate-700">
+      <button @click="token='';localStorage.removeItem('as_token')" class="w-full py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">退出登录</button>
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+    <!-- 顶部栏 -->
+    <header class="h-14 bg-slate-850 border-b border-slate-700 flex items-center justify-between px-6">
+      <span class="text-sm text-slate-400" x-text="{'dashboard':'\u4eea\u8868\u76d8','tasks':'\u4efb\u52a1\u7ba1\u7406','hitl':'HITL \u4eba\u5de5\u5ba1\u6838','tenant':'\u79df\u6237\u914d\u7f6e'}[page]"></span>
+      <div class="flex items-center gap-3">
+        <span class="text-xs px-2 py-1 rounded bg-green-900 text-green-300" x-show="connected" x-cloak>✅ 连接正常</span>
+        <span class="text-xs px-2 py-1 rounded bg-red-900 text-red-300" x-show="!connected" x-cloak>❌ 连接断开</span>
+      </div>
+    </header>
+
+    <div class="flex-1 overflow-auto p-6">
+      <!-- 仪表盘 -->
+      <div x-show="page==='dashboard'" x-cloak>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <p class="text-slate-400 text-sm">总任务</p>
+            <p class="text-3xl font-bold text-white mt-1" x-text="stats.total_tasks"></p>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <p class="text-slate-400 text-sm">今日任务</p>
+            <p class="text-3xl font-bold text-blue-400 mt-1" x-text="stats.today_tasks"></p>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <p class="text-slate-400 text-sm">待 HITL 审核</p>
+            <p class="text-3xl font-bold text-amber-400 mt-1" x-text="stats.pending_hitl"></p>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <p class="text-slate-400 text-sm">成功率</p>
+            <p class="text-3xl font-bold text-green-400 mt-1" x-text="stats.success_rate+'%'"></p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <h3 class="font-semibold mb-4">状态分布</h3>
+            <template x-for="(count, status) in stats.status_distribution" :key="status">
+              <div class="mb-3">
+                <div class="flex justify-between text-sm mb-1"><span x-text="status"></span><span x-text="count"></span></div>
+                <div class="w-full bg-slate-700 rounded-full h-2">
+                  <div class="bar bg-blue-500" :style="`width:${(count/stats.total_tasks*100)||0}%`"></div>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+            <h3 class="font-semibold mb-4">文件类型分布</h3>
+            <template x-for="(count, type) in stats.type_distribution" :key="type">
+              <div class="mb-3">
+                <div class="flex justify-between text-sm mb-1"><span x-text="type||'unknown'"></span><span x-text="count"></span></div>
+                <div class="w-full bg-slate-700 rounded-full h-2">
+                  <div class="bar bg-emerald-500" :style="`width:${(count/stats.total_tasks*100)||0}%`"></div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务管理 -->
+      <div x-show="page==='tasks'" x-cloak>
+        <div class="flex items-center gap-3 mb-4">
+          <select x-model="taskFilter.status" @change="loadTasks()" class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm">
+            <option value="">全部状态</option>
+            <option value="pending">pending</option>
+            <option value="parsing">parsing</option>
+            <option value="analyzing">analyzing</option>
+            <option value="hitl_review">hitl_review</option>
+            <option value="delivered">delivered</option>
+            <option value="failed">failed</option>
+          </select>
+          <input x-model="taskFilter.tenant_id" @keyup.enter="loadTasks()" placeholder="租户ID筛选" class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm w-48">
+          <button @click="loadTasks()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm">刷新</button>
+        </div>
+        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+          <table class="w-full text-sm text-left">
+            <thead class="bg-slate-700 text-slate-300 uppercase text-xs">
+              <tr><th class="px-4 py-3">ID</th><th class="px-4 py-3">文件名</th><th class="px-4 py-3">租户</th><th class="px-4 py-3">状态</th><th class="px-4 py-3">HITL</th><th class="px-4 py-3">时间</th><th class="px-4 py-3">操作</th></tr>
+            </thead>
+            <tbody>
+              <template x-for="t in tasks" :key="t.id">
+                <tr class="border-b border-slate-700 hover:bg-slate-750">
+                  <td class="px-4 py-3" x-text="t.id"></td>
+                  <td class="px-4 py-3 font-medium" x-text="t.filename"></td>
+                  <td class="px-4 py-3" x-text="t.tenant_id"></td>
+                  <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs font-semibold" :class="statusClass(t.status)" x-text="t.status"></span></td>
+                  <td class="px-4 py-3" x-text="t.hitl_status"></td>
+                  <td class="px-4 py-3 text-slate-400" x-text="formatTime(t.created_at)"></td>
+                  <td class="px-4 py-3">
+                    <button @click="openTask(t.id)" class="text-blue-400 hover:underline text-xs">详情</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex items-center justify-between mt-4 text-sm">
+          <span class="text-slate-400">共 <span x-text="taskTotal"></span> 条</span>
+          <div class="flex gap-2">
+            <button @click="taskFilter.page--;loadTasks()" :disabled="taskFilter.page<=1" class="px-3 py-1 rounded bg-slate-700 disabled:opacity-50">上一页</button>
+            <span class="px-2 py-1" x-text="taskFilter.page"></span>
+            <button @click="taskFilter.page++;loadTasks()" class="px-3 py-1 rounded bg-slate-700">下一页</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- HITL 审核 -->
+      <div x-show="page==='hitl'" x-cloak>
+        <h2 class="text-lg font-semibold mb-4">待人工审核任务</h2>
+        <div class="space-y-4">
+          <template x-for="t in hitlTasks" :key="t.id">
+            <div class="bg-slate-800 rounded-xl p-5 border border-slate-700">
+              <div class="flex justify-between items-start mb-3">
+                <div>
+                  <h3 class="font-semibold text-white" x-text="t.filename"></h3>
+                  <p class="text-xs text-slate-400 mt-1">任务ID: <span x-text="t.id"></span> | 租户: <span x-text="t.tenant_id"></span></p>
+                </div>
+                <span class="px-2 py-1 rounded text-xs bg-amber-900 text-amber-300" x-text="t.hitl_status"></span>
+              </div>
+              <div class="bg-slate-900 rounded-lg p-4 mb-4 text-sm space-y-2">
+                <p><span class="text-slate-400">AI 类型:</span> <span x-text="t.ai_result?.doc_type||'-'"></span></p>
+                <p><span class="text-slate-400">AI 标签:</span> <span x-text="(t.ai_result?.tags||[]).join(', ')"></span></p>
+                <p><span class="text-slate-400">置信度:</span> <span x-text="t.ai_result?.confidence||0"></span></p>
+                <p><span class="text-slate-400">摘要:</span> <span x-text="t.ai_result?.summary||'-'"></span></p>
+                <p><span class="text-slate-400">原文预览:</span> <span class="text-slate-500" x-text="(t.parsed_data?.text||'').substring(0,200)+'...'"></span></p>
+              </div>
+              <div class="flex gap-2">
+                <button @click="hitlAction(t.id,'approve')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm font-medium">✅ 确认通过</button>
+                <button @click="hitlAction(t.id,'reject')" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium">❌ 拒绝</button>
+                <button @click="openHitlModify(t)" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">✏️ 修改后通过</button>
+              </div>
+            </div>
+          </template>
+          <div x-show="hitlTasks.length===0" class="text-center text-slate-500 py-10">暂无待审核任务 🎉</div>
+        </div>
+      </div>
+
+      <!-- 租户配置 -->
+      <div x-show="page==='tenant'" x-cloak>
+        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 max-w-3xl">
+          <h2 class="text-lg font-semibold mb-4">租户配置</h2>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">Tenant ID</label>
+              <input x-model="tenantForm.tenant_id" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">名称</label>
+              <input x-model="tenantForm.name" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">Webhook URL</label>
+              <input x-model="tenantForm.webhook_url" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">Webhook Secret</label>
+              <input x-model="tenantForm.webhook_secret" type="password" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">规则引擎 (JSON)</label>
+              <textarea x-model="tenantForm.rules_json" rows="6" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm font-mono text-xs"></textarea>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">HITL 配置 (JSON)</label>
+              <textarea x-model="tenantForm.hitl_json" rows="6" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm font-mono text-xs"></textarea>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-400 mb-1">管道配置 (JSON)</label>
+              <textarea x-model="tenantForm.pipeline_json" rows="4" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm font-mono text-xs"></textarea>
+            </div>
+            <div class="flex gap-3 pt-2">
+              <button @click="saveTenant()" class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium">保存配置</button>
+              <span x-show="saveMsg" x-text="saveMsg" class="text-sm py-2" :class="saveOk?'text-green-400':'text-red-400'"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 任务详情弹窗 -->
+<div x-show="taskModal.open" class="fixed inset-0 z-40 flex items-center justify-center bg-black/60" x-cloak @click.self="taskModal.open=false">
+  <div class="bg-slate-800 rounded-xl w-full max-w-2xl max-h-[80vh] overflow-auto p-6 border border-slate-700 shadow-2xl">
+    <h3 class="text-lg font-bold mb-4">任务详情 #<span x-text="taskModal.data.id"></span></h3>
+    <pre class="bg-slate-900 rounded-lg p-4 text-xs text-slate-300 overflow-auto" x-text="JSON.stringify(taskModal.data,null,2)"></pre>
+    <div class="mt-4 flex justify-end">
+      <button @click="taskModal.open=false" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- HITL 修改弹窗 -->
+<div x-show="hitlModal.open" class="fixed inset-0 z-40 flex items-center justify-center bg-black/60" x-cloak @click.self="hitlModal.open=false">
+  <div class="bg-slate-800 rounded-xl w-full max-w-lg p-6 border border-slate-700 shadow-2xl">
+    <h3 class="text-lg font-bold mb-4">修改 AI 结果</h3>
+    <div class="space-y-3 text-sm">
+      <div><label class="text-slate-400">标签 (英文逗号分隔)</label><input x-model="hitlModal.tags" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 mt-1"></div>
+      <div><label class="text-slate-400">文档类型</label><input x-model="hitlModal.doc_type" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 mt-1"></div>
+      <div><label class="text-slate-400">摘要</label><textarea x-model="hitlModal.summary" rows="3" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 mt-1"></textarea></div>
+      <div><label class="text-slate-400">优先级</label>
+        <select x-model="hitlModal.priority" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 mt-1">
+          <option value="normal">normal</option><option value="high">high</option><option value="low">low</option>
+        </select>
+      </div>
+    </div>
+    <div class="mt-5 flex gap-2 justify-end">
+      <button @click="hitlModal.open=false" class="px-4 py-2 rounded bg-slate-700 text-sm">取消</button>
+      <button @click="submitHitlModify()" class="px-4 py-2 rounded bg-blue-600 text-white text-sm">确认修改</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function app() {
+  return {
+    token: localStorage.getItem('as_token') || '',
+    inputToken: '',
+    connected: false,
+    page: 'dashboard',
+    stats: { total_tasks: 0, today_tasks: 0, pending_hitl: 0, success_rate: 0, status_distribution: {}, type_distribution: {} },
+    tasks: [],
+    taskTotal: 0,
+    taskFilter: { status: '', tenant_id: '', page: 1, page_size: 20 },
+    hitlTasks: [],
+    tenantForm: { tenant_id: 'tenant_001', name: '', webhook_url: '', webhook_secret: '', rules_json: '', hitl_json: '', pipeline_json: '' },
+    saveMsg: '',
+    saveOk: true,
+    taskModal: { open: false, data: {} },
+    hitlModal: { open: false, taskId: null, tags: '', doc_type: '', summary: '', priority: 'normal' },
+
+    async initApp() {
+      if (!this.token) return;
+      await this.checkHealth();
+      if (this.connected) this.loadStats();
+    },
+
+    saveToken() {
+      this.token = this.inputToken;
+      localStorage.setItem('as_token', this.token);
+      this.initApp();
+    },
+
+    async api(url, opts = {}) {
+      const res = await fetch(url, {
+        ...opts,
+        headers: {
+          'Authorization': 'Bearer ' + this.token,
+          'Content-Type': 'application/json',
+          ...opts.headers
+        }
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      return res.json();
+    },
+
+    async checkHealth() {
+      try {
+        await this.api('/api/v1/health');
+        this.connected = true;
+      } catch (e) {
+        this.connected = false;
+      }
+    },
+
+    async loadStats() {
+      try {
+        this.stats = await this.api('/api/v1/admin/stats');
+      } catch (e) { console.error(e); }
+    },
+
+    async loadTasks() {
+      try {
+        const q = new URLSearchParams({ page: this.taskFilter.page, page_size: this.taskFilter.page_size });
+        if (this.taskFilter.status) q.set('status', this.taskFilter.status);
+        if (this.taskFilter.tenant_id) q.set('tenant_id', this.taskFilter.tenant_id);
+        const data = await this.api('/api/v1/admin/tasks?' + q.toString());
+        this.tasks = data.tasks;
+        this.taskTotal = data.total;
+      } catch (e) { console.error(e); }
+    },
+
+    async loadHitlTasks() {
+      try {
+        const data = await this.api('/api/v1/admin/tasks?status=hitl_review&page=1&page_size=100');
+        this.hitlTasks = data.tasks;
+      } catch (e) { console.error(e); }
+    },
+
+    async openTask(id) {
+      try {
+        const t = await this.api('/api/v1/tasks/' + id);
+        this.taskModal.data = t;
+        this.taskModal.open = true;
+      } catch (e) { alert(e.message); }
+    },
+
+    statusClass(s) {
+      const map = { delivered: 'bg-green-900 text-green-300', failed: 'bg-red-900 text-red-300', hitl_review: 'bg-amber-900 text-amber-300', pending: 'bg-slate-700 text-slate-300' };
+      return map[s] || 'bg-slate-700 text-slate-300';
+    },
+
+    formatTime(iso) {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return d.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    },
+
+    async hitlAction(id, action) {
+      try {
+        await this.api('/api/v1/admin/tasks/' + id + '/hitl/' + action, { method: 'POST', body: JSON.stringify({ reviewer: 'admin' }) });
+        this.loadHitlTasks();
+        this.loadStats();
+      } catch (e) { alert(e.message); }
+    },
+
+    openHitlModify(t) {
+      const ai = t.ai_result || {};
+      this.hitlModal = {
+        open: true, taskId: t.id,
+        tags: (ai.tags || []).join(', '),
+        doc_type: ai.doc_type || '',
+        summary: ai.summary || '',
+        priority: ai.priority || 'normal'
+      };
+    },
+
+    async submitHitlModify() {
+      try {
+        await this.api('/api/v1/admin/tasks/' + this.hitlModal.taskId + '/hitl/modify', {
+          method: 'POST',
+          body: JSON.stringify({
+            reviewer: 'admin',
+            tags: this.hitlModal.tags.split(',').map(s => s.trim()).filter(Boolean),
+            doc_type: this.hitlModal.doc_type,
+            summary: this.hitlModal.summary,
+            priority: this.hitlModal.priority
+          })
+        });
+        this.hitlModal.open = false;
+        this.loadHitlTasks();
+        this.loadStats();
+      } catch (e) { alert(e.message); }
+    },
+
+    async loadTenant() {
+      try {
+        const tid = this.tenantForm.tenant_id;
+        const data = await this.api('/api/v1/admin/tenants/' + tid + '/config');
+        this.tenantForm.name = data.name || '';
+        this.tenantForm.webhook_url = data.webhook_url || '';
+        this.tenantForm.webhook_secret = data.webhook_secret || '';
+        this.tenantForm.rules_json = JSON.stringify(data.rules || [], null, 2);
+        this.tenantForm.hitl_json = JSON.stringify(data.hitl_config || {}, null, 2);
+        this.tenantForm.pipeline_json = JSON.stringify(data.pipeline || {}, null, 2);
+      } catch (e) {
+        // 租户不存在，保留表单为空
+      }
+    },
+
+    async saveTenant() {
+      try {
+        const body = {
+          name: this.tenantForm.name,
+          webhook_url: this.tenantForm.webhook_url,
+          webhook_secret: this.tenantForm.webhook_secret,
+          rules: JSON.parse(this.tenantForm.rules_json || '[]'),
+          hitl_config: JSON.parse(this.tenantForm.hitl_json || '{}'),
+          pipeline: JSON.parse(this.tenantForm.pipeline_json || '{}'),
+        };
+        await this.api('/api/v1/admin/tenants/' + this.tenantForm.tenant_id + '/config', { method: 'PUT', body: JSON.stringify(body) });
+        this.saveOk = true; this.saveMsg = '保存成功 ✅';
+      } catch (e) {
+        this.saveOk = false; this.saveMsg = '保存失败: ' + e.message;
+      }
+      setTimeout(() => this.saveMsg = '', 3000);
+    }
+  };
+}
+</script>
+</body>
+</html>

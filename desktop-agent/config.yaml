@@ -1,0 +1,7 @@
+tenant_id: "tenant_001"
+api_token: "changeme"
+cloud_base_url: "http://localhost:8080/api/v1"
+watch_folder: "C:/Users/你的用户名/Desktop/待提交数据"
+scan_interval_seconds: 60          # 后台轮询间隔（秒）
+mode: "auto"                         # auto(后台) / once(运行一次退出)
+oss_provider: "aliyun"               # aliyun / minio / aws
